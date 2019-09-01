@@ -22,10 +22,10 @@ createDirectory_setPath <- function(dir.name) {
         ## 1. If directory dir.name does not exist, create
         ## 2. Set working directory to dir.name
         
-        if(!dir.exists(direct)) {
-                dir.create(direct)    
+        if(!exists(dir.name)) {
+                dir.create(dir.name)    
         }
-        setwd(direct)
+        setwd(dir.name)
 }
 
 retrieveZipFile <- function(url, zipname) {
@@ -51,20 +51,33 @@ UnzipandSaveFiles <- function(file_names, Ziplist, Zipname) {
         
         file_names_ext <- paste(file_names, ".txt", sep = "")
         for(i in 1:length(file_names_ext)) {
-                ptr <- grep(paste(file_names_ext, "$", sep = ""), ZipList)
+                ptr <- grep(paste("/", file_names_ext[i], "$", sep = ""), Ziplist)
                 filenm <- Ziplist[ptr]
-                a <- unzip(Zipname, filenm)
-                con <- file(Zipname)
-                df_temp <- readLines(con)
-                close(con)
-                        
-                filenm2 <- basename(filenm)
-                con <- file(filenm2, "wt")
-                writeLines(df_temp, con)
-                close(con)
+                
+                if(i <= 7) {
+                        a <- unzip(Zipname, filenm)
+                        con <- file(filenm, "rt")
+                        df_temp <- readLines(con, skipNul = TRUE)
+                        close(con)
+                        filenm2 <- basename(filenm)
+                        filenm2
+                        con <- file(filenm2, "wt")
+                        writeLines(df_temp, con)
+                        close(con)
+                } else {
+                        a <- unzip(Zipname, filenm)
+                        con <- file(filenm, "rb")
+                        df_temp <- readLines(con)
+                        close(con)
+                        filenm2 <- basename(filenm)
+                        filenm2
+                        con <- file(filenm2, "wb")
+                        writeLines(df_temp, con)
+                        close(con)
+                }
         }
-        return(file_names_ext)
         
+        return(file_names_ext)
 }
 
 getTextLines <- function(filename) {
@@ -75,11 +88,21 @@ getTextLines <- function(filename) {
 }
 
 getBinaryData <- function(filename){
-        ## Retrieve data from file of binary results and return the data frame
+        ## 1. Retrieve data from file of binary results
+        ## 2. Convert lines of 561 values to data frame and return
         
-        con <- file(filename, "rb")
-        df_temp <- read.csv(filename, header = FALSE)
+        con <- file(filename, "rt")
+        vector_temp <- readLines(con)
         close(con)
+        
+        df_temp <- data.frame()
+        for(i in 1:length(vector_temp)) {
+                for(j in 1:561) {
+                        str_ptr <- 16 * (j - 1) + 3
+                        df_temp[i, j] <- as.numeric(substr(vector_temp[i], str_ptr, (str_ptr + 14)))
+                }
+        }
+        
         return(df_temp)
 }
 
@@ -94,11 +117,13 @@ removeLeadingDigits <- function(df) {
 addOrigin_SubjectandActivityNumber <- function(origin,subj_df, act_df, primary_df) {
         ## 1. Create vector naming origin dataset for data
         ## 2. Combine origin column, subject column, and activity column with results data frame 
-        origin_vector <- rep(orgin, times = nrow(primary_df))
-        combined <- cbind(origin_vector, subj_df, act_df)
-        colnames(combined)[1] <- "dataset of origin"
-        return(combined)
+        origin_vector <- rep(origin, times = nrow(primary_df))
+        combined <- cbind(origin_vector, subj_df, act_df, primary_df)
+        colnames(combined)[1] <- "dataset_origin"
+        colnames(combined)[2] <- "subject"
+        colnames(combined)[3] <- "activity"
         
+        return(combined)
 }
 
 combineSingleFrame <- function(df_1, df_2) {
@@ -106,8 +131,8 @@ combineSingleFrame <- function(df_1, df_2) {
         ## This will allow rowbinding of the train and test results
         ## 2. Combine rows to create single data from df_1 & df_2
         
-        colnames(df_1)[1:3] <- c("data set of origin", "subject", "activity")
-        colnames(df_2)[1:3] <- c("data set of origin", "subject", "activity")
+        colnames(df_1)[1:3] <- c("dataset_origin", "subject", "activity")
+        colnames(df_2)[1:3] <- c("dataset_origin", "subject", "activity")
         
         return(rbind(df_1, df_2))
 }
@@ -123,11 +148,10 @@ keepMeanandSTDColumns <- function(full_df) {
         ## 1. Create vector of column indexes where column name has either "mean" or "std
         ## 2. Return data frame, selecting just those columns
         
-       
         mean_ptr <- grep("mean", colnames(full_df))
         std_ptr <- grep("std", colnames(full_df))
         ptr <- c(1, 2, 3)                                                       ## Keep 1st 3 id columns 
-        ptr[(length(ptr)+1): (length(ptr)) + length(mean_ptr)] <- mean_ptr      ## Keep mean columns
+        ptr[(length(ptr) + 1):(length(ptr) + length(mean_ptr))] <- mean_ptr     ## Keep mean columns
         ptr[(length(ptr) + 1):(length(ptr) + length(std_ptr))] <- std_ptr       ## Keep standard deviation columns
         ptr <- sort(unique(ptr))
         full_temp <- full_df[ptr]
@@ -137,56 +161,75 @@ keepMeanandSTDColumns <- function(full_df) {
 
 cleanHeaderNames <- function(df_temp) {
         ## 1. convert all column data to lower case
-        ## 2. Remove unhelpful leading "t" or "f" from column names
-        ## 3. convert all short words in descriptions to full words, add spaces, remove punctuation ("()", "-")
-        ## 4. Remove unnecessary ".1" endings
+        ## 2. convert all short words in descriptions to full words, add spaces, remove punctuation ("()", "-")
+        ## 3. Remove unnecessary ".1" endings
+        ## 4. Removeleading "t" or "f" from column names and replace with time or frequency just before firt hyphen        
 
         colnames(df_temp) <- tolower(colnames(df_temp))
         
-        colnames(df_temp) <- gsub("^t", "", colnames(df_temp))
-        colnames(df_temp) <- gsub("^f", "", colnames(df_temp))
+        colnames(df_temp) <- gsub("gyro", "gyroscope_", colnames(df_temp))
+        colnames(df_temp) <- gsub("body", "body_", colnames(df_temp))
+        colnames(df_temp) <- gsub("acc", "acceleration_", colnames(df_temp))
+        colnames(df_temp) <- gsub("jerk", "jerk_", colnames(df_temp))
+        colnames(df_temp) <- gsub("mag", "magnitude_", colnames(df_temp))
+        colnames(df_temp) <- gsub("gravity", "gravity_", colnames(df_temp))
+        colnames(df_temp) <- gsub("-std", "standard_deviation", colnames(df_temp))
+        colnames(df_temp) <- gsub("-meanfreq", "average", colnames(df_temp))
+        colnames(df_temp) <- gsub("-mean", "mean", colnames(df_temp))
+        colnames(df_temp) <- gsub("\\(\\)", "", colnames(df_temp))
         
-        colnames(df_temp) <- gsub("gyro", "gyroscope ", colnames(df_temp))
-        colnames(df_temp) <- gsub("body", "body ", colnames(df_temp))
-        colnames(df_temp) <- gsub("acc", "acceleration ", colnames(df_temp))
-        colnames(df_temp) <- gsub("jerk", "jerk ", colnames(df_temp))
-        colnames(df_temp) <- gsub("mag", "magnitude ", colnames(df_temp))
-        colnames(df_temp) <- gsub("gravity", "gravity ", colnames(df_temp))
-        colnames(df_temp) <- gsub("-std()", "standard deviation", colnames(df_temp))
-        colnames(df_temp) <- gsub("-meanfreq()", "frequency average", colnames(df_temp))
-        colnames(df_temp) <- gsub("-mean()", " mean", colnames(df_temp))
+        for(i in 1:length(colnames(df_temp))) {                                 ## Search each column heading for a
+                for(j in 1:nchar(colnames(df_temp)[i])) {                       ## starting "f" or "t." Add "frequency"
+                        if(str_sub(colnames(df_temp)[i], j, j) == "-") {        ## near end of heading for "f"; add "time"
+                                 if (str_sub(colnames(df_temp)[i], 1, 1) == "f") {        ## for "t." Then remove the
+                                        stringx <- str_sub(colnames(df_temp)[i], (j + 1)) ## add back remainder of string
+                                        str_sub(colnames(df_temp)[i], j) <- "_frequency-" ## remove the leading "f" or "t"
+                                        colnames(df_temp)[i] <- paste(colnames(df_temp)[i], 
+                                                                      stringx, sep = "")  ## and add "frequency" or "time,"
+                                        str_sub(colnames(df_temp)[i], 1, 1) <- ""         ## respectively, before "-".
+                                } else if(str_sub(colnames(df_temp)[i], 1, 1) == "t") {
+                                        stringx <- str_sub(colnames(df_temp)[i], (j + 1))
+                                        str_sub(colnames(df_temp)[i], j) <- "_time-"
+                                        colnames(df_temp)[i] <- paste(colnames(df_temp)[i], 
+                                                                      stringx, sep = "")
+                                        str_sub(colnames(df_temp)[i], 1, 1) <- ""
+                                }
+                                j <- nchar(colnames(df_temp)[i])
+                        } else if(j == nchar(colnames(df_temp)[i])) {                     ## Similar to above but add
+                                if (str_sub(colnames(df_temp)[i], 1, 1) == "f") {         ## "frequency" or "time" to the
+                                        str_sub(colnames(df_temp)[i], j+1) <- "_frequency"## end, if no "-".
+                                        str_sub(colnames(df_temp)[i], 1, 1) <- ""
+                                } else if(str_sub(colnames(df_temp)[i], 1, 1) == "t") {
+                                        str_sub(colnames(df_temp)[i], j+1) <- "_time"
+                                        str_sub(colnames(df_temp)[i], 1, 1) <- ""
+                                }
+                        }
+                }
+        }
         
-        colnames(df_temp)<- gsub("\.1$", "", colnames(df))
-
         return(df_temp)
 }
 
-splitX_Y_and_Z_Columns <- (df_var) {
-        l_local <- vector("list")                                       ## List for advanced melt usage
-        value_local <- vector("character")                              ## Vector variable names for columns
-        ptr_split <- grep("-x$", colnames(df_var))                      ## Get vector of colnames ending in "x"
+splitX_Y_and_Z_Columns <- function(df_var) {
+        ## Split all separate measure columns for the same dataset (training or test), subject, and activity into
+        ## separate rows.
         
-        for(i in 1:length(ptr_split)) {                                 ## Loop around pointers to "x" columns
-                gen_head <- gsub("-x$", "", colnames(df_var)[ptr_split]) ## Get generic column header w/o "x", "y" or "z"
-                col_heads <- paste(gen_head, c("x, y, z"), sep = "")    ## Create the names of the x, y, and z headers
-                l_local[(length(l_local + 1)):(length(l_local) +        
-                                length(col_heads))] <- col_heads        ## Add these x, y, and z columns to the list
-                value_local[(length(value_local) + 1)] <- gen_head
-        }
-        
-        id_var <- c(colnames(df_var)[1], colnames(df_var)[2], colnames(df_var)[3]) ## Keep 1st 3 columns
-        df_split <- melt(df_var, id = id_var, measure = l_local, value.name = value_local)
+        df_split <- gather(df_var, "measure", "value", 4:length(colnames(df_var))) 
+        df_split <- as_tibble(df_split)
+        df_split <- arrange(df_split, dataset_origin, subject, activity, measure)
         
         return(df_split)
 }
 
 outputResultstoCSV <- function(df_local, fname) {
+        ## Write out results from data frame to named file
+        
         con <- file(fname, "wt")
-        write.csv(df_local, fname)
+        write.table(df_local, fname, row.names = FALSE)
         close(con)
 }
 
-run_analysis <- function() {
+run_analysis <- function(dir.initial) {
         
         ## Set values of needed variables
         ## These include: a) the name of the directory; b) the URL containing the zip file; c) the downloaded zip file name;
@@ -197,17 +240,20 @@ run_analysis <- function() {
         zipf <- "Dataset.zip"
         extract_list <- c("features", "activity_labels", "subject_train", "subject_test", "y_train", "y_test",
                           "features_info", "X_train", "X_test")
-        tidy_name <- "HARUS_tidy.csv"
-        summary_name <- "HARUS_tidy_summary.csv"
+        tidy_name <- "HARUS_tidy.txt"
+        summary_name <- "HARUS_tidy_summary.txt"
         
         ## Load standrd libraries used
         library(plyr)
-        libary(dplyr)
+        library(dplyr)
+        library(tidyr)
         library(reshape2)
+        library(stringr)
         library(readr)
         
         ## Create directory (if necessary) and set directory path.
         ## Download the .zip file containing the necessary files.
+        setwd(dir.initial)
         createDirectory_setPath(direct)
         retrieveZipFile(fileURL, zipf)
 
@@ -234,8 +280,9 @@ run_analysis <- function() {
         activity_df <- removeLeadingDigits(activity_df)
         
         ## Add column names from features to train and test data frames
-        colnames(train_df) <- feature_df
-        colnames(test_df) <- features_df
+   
+        colnames(train_df)[1:561] <- features_df[1:561]
+        colnames(test_df)[1:561] <- features_df[1:561]
         
         ## Add origin data set name (TRAIN or TEST, subject and activity data columns for both the train and
         ## test data frames
@@ -264,7 +311,11 @@ run_analysis <- function() {
         ## Group, summarize and store summary resuts
         ## 1. Group and summarize results by: data group ("TRAIN" vs. "TEST); subject; activity; x, y and z.
         ## 2. Output summarized results ro "HARUS_tidy_summary.csv"
-        min_split_df %>% group_by(colnames(1), colnames(2), colnames(3), colnames(4))
-        sum_split_df <- summarize_all(min_split_df, "mean")     
-        OutputResultstoCSV(sum_split_df, summary_name)
+        browser()
+        sum_split_df <- min_split_df %>% group_by(dataset_origin, subject, activity, measure) %>%
+                                  summarize(mean = mean(value, na.rm = TRUE))
+        browser()
+        outputResultstoCSV(sum_split_df, summary_name)
+        
+        setwd(dir.initial)
 }
